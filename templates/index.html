@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Real-time HTML Lab</title>
+  <style>
+    textarea {
+      width: 100%; height: 75vh;
+      font-family: monospace;
+      font-size: 16px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Live Room: {{ room }}</h2>
+  <textarea id="editor" placeholder="Paste your HTML here..."></textarea>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script>
+    const socket = io();
+    const room = "{{ room }}";
+    const editor = document.getElementById("editor");
+
+    let selfEdit = false;
+
+    socket.emit("join", { room });
+
+    socket.on("update", (text) => {
+      if (!selfEdit) editor.value = text;
+    });
+
+    editor.addEventListener("input", () => {
+      selfEdit = true;
+      socket.emit("edit", { room, text: editor.value });
+      setTimeout(() => selfEdit = false, 50);
+    });
+  </script>
+</body>
+</html>
