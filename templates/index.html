@@ -2,59 +2,165 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Live HTML Share</title>
+  <title>Live HTML + Voice Lab</title>
   <style>
     body {
       font-family: sans-serif;
-      padding: 20px;
-      background: #f0f0f0;
+      margin: 0; padding: 0;
+      background: #f9f9f9;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    header {
+      padding: 10px 20px;
+      background: #4A90E2;
+      color: white;
+      font-size: 18px;
+    }
+    .room-id { font-weight: bold; }
+    .controls {
+      padding: 10px 20px;
+      background: #eee;
+      display: flex;
+      gap: 10px;
     }
     textarea {
-      width: 100%;
-      height: 75vh;
-      font-family: monospace;
+      flex-grow: 1;
+      padding: 12px;
+      margin: 0;
+      border: none;
+      resize: none;
       font-size: 16px;
-      margin-bottom: 10px;
+      font-family: monospace;
     }
     button {
-      padding: 8px 16px;
+      padding: 8px 14px;
       font-size: 14px;
       cursor: pointer;
+      border: none;
+      border-radius: 4px;
     }
+    .copy-btn { background: #4CAF50; color: white; }
+    .voice-btn { background: #ff9800; color: white; }
+    .toast {
+      position: fixed;
+      bottom: 20px; left: 50%;
+      transform: translateX(-50%);
+      background: #333; color: white;
+      padding: 10px 16px;
+      border-radius: 4px;
+      opacity: 0;
+      transition: all 0.4s;
+    }
+    .toast.show { opacity: 1; }
   </style>
 </head>
 <body>
-	<h1> Cheating in the computer lab.</h1>
-	
-  <h2>Room: {{ room }}</h2>
-  <button onclick="copyToClipboard()">📋 Copy Code</button>
-  
-  <textarea id="editor" placeholder="Write your HTML here..."></textarea>
-  <br>
-  
+	<h1 style="text-align:center; margin: 20px 0; color: #c0392b;">
+	  Cheating in the computer lab.
+	</h1>
+  <header>🔗 Shared Room: <span class="room-id">{{ room }}</span></header>
+  <div class="controls">
+    <button class="copy-btn" onclick="copyToClipboard()">📋 Copy Code</button>
+    <button class="voice-btn" id="voiceBtn">🎤 Start Voice Chat</button>
+  </div>
+  <textarea id="editor" placeholder="Write your HTML code here..."></textarea>
+  <div class="toast" id="toast">Copied to clipboard!</div>
+
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script>
     const socket = io();
     const room = "{{ room }}";
     const editor = document.getElementById("editor");
+    const voiceBtn = document.getElementById("voiceBtn");
+    const toast = document.getElementById("toast");
 
-    let selfEdit = false;
+    let selfEdit = false, pc, localStream;
 
+    // Realtime HTML syncing
     socket.emit("join", { room });
-
     socket.on("update", (text) => {
       if (!selfEdit) editor.value = text;
     });
-
     editor.addEventListener("input", () => {
       selfEdit = true;
       socket.emit("edit", { room, text: editor.value });
       setTimeout(() => selfEdit = false, 50);
     });
 
+    // Copy Code + Toast
     function copyToClipboard() {
       editor.select();
       document.execCommand("copy");
+      toast.classList.add("show");
+      setTimeout(() => toast.classList.remove("show"), 2000);
+    }
+
+    // WebRTC Voice Chat
+    const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+
+    voiceBtn.onclick = async () => {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert("🎤 Voice chat not supported in this browser.");
+        return;
+      }
+      if (voiceBtn.textContent.includes("Start")) {
+        await startVoice();
+      } else {
+        stopVoice();
+      }
+    };
+
+    async function startVoice() {
+      voiceBtn.textContent = "🔴 Stop Voice Chat";
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        pc = new RTCPeerConnection(config);
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+        pc.onicecandidate = e => {
+          if (e.candidate) socket.emit("webrtc-candidate", { room, candidate: e.candidate });
+        };
+        pc.ontrack = e => {
+          const audio = new Audio();
+          audio.srcObject = e.streams[0];
+          audio.play();
+        };
+
+        socket.on("webrtc-offer", async data => {
+          if (data.room === room) {
+            await pc.setRemoteDescription(data.sdp);
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            socket.emit("webrtc-answer", { room, sdp: pc.localDescription });
+          }
+        });
+
+        socket.on("webrtc-answer", async data => {
+          if (data.room === room) await pc.setRemoteDescription(data.sdp);
+        });
+
+        socket.on("webrtc-candidate", data => {
+          if (data.room === room) pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        });
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit("webrtc-offer", { room, sdp: pc.localDescription });
+      } catch (err) {
+        alert("Mic access failed: " + err.message);
+        voiceBtn.textContent = "🎤 Start Voice Chat";
+      }
+    }
+
+    function stopVoice() {
+      voiceBtn.textContent = "🎤 Start Voice Chat";
+      if (localStream) localStream.getTracks().forEach(track => track.stop());
+      if (pc) pc.close();
+      socket.off("webrtc-offer");
+      socket.off("webrtc-answer");
+      socket.off("webrtc-candidate");
     }
   </script>
 </body>
