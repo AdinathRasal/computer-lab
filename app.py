@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request,send_from_directory
 from flask_socketio import SocketIO, join_room, emit
 
 app = Flask(__name__)
@@ -34,6 +34,11 @@ def webrtc_answer(data):
 @socketio.on('webrtc-candidate')
 def webrtc_candidate(data):
     emit('webrtc-candidate', data, room=data['room'], include_self=False)
+    
+@app.route('/download-project')
+def download_project():
+    return send_from_directory('static', 'IT.zip', as_attachment=True)
+
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=5000)
